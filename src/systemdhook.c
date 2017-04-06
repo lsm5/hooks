@@ -640,12 +640,16 @@ int main(int argc, char *argv[])
 	_cleanup_(yajl_tree_freep) yajl_val config_node = NULL;
 	char errbuf[BUFLEN];
 	char stateData[CONFIGSZ];
-	char configData[CONFIGSZ];
+	char config_file_path_buf[PATH_MAX];
+	char *config_file_name = "";
+	char *configData;
+	off_t configData_size;
+	struct stat configData_stat;
 	_cleanup_fclose_ FILE *fp = NULL;
 	bool docker = false;
 
-	stateData[0] = 0;
-	errbuf[0] = 0;
+	memset(stateData, 0, CONFIGSZ);
+	memset(errbuf, 0, BUFLEN);
 
 	/* Read the entire config file from stdin */
 	rd = fread((void *)stateData, 1, sizeof(stateData) - 1, stdin);
@@ -704,15 +708,15 @@ int main(int argc, char *argv[])
 			pr_perror("cannot find config file to use");
 			return EXIT_FAILURE;
 		}
-
-		fp = fopen(argv[2], "r");
+		config_file_name = argv[2];
+		fp = fopen(config_file_name, "r");
 	} else {
 		/* bundle_path must be specified for the OCI hooks, and from there we read the configuration file.
 		   If it is not specified, then check that it is specified on the command line.  */
 		const char *bundle_path[] = { "bundlePath", (const char *)0 };
 		yajl_val v_bundle_path = yajl_tree_get(node, bundle_path, yajl_t_string);
 		if (v_bundle_path) {
-			char config_file_name[PATH_MAX];
+			config_file_name = config_file_path_buf;
 			sprintf(config_file_name, "%s/config.json", YAJL_GET_STRING(v_bundle_path));
 			fp = fopen(config_file_name, "r");
 		}
@@ -720,19 +724,37 @@ int main(int argc, char *argv[])
 
 
 	/* Parse the config file */
+
 	if (fp == NULL) {
-		pr_perror("Failed to open config file: %s", argv[2]);
-		return EXIT_FAILURE;
-	}
-	rd = fread((void *)configData, 1, sizeof(configData) - 1, fp);
-	if (rd == 0 && !feof(fp)) {
-		pr_perror("error encountered on file read");
-		return EXIT_FAILURE;
-	} else if (rd >= sizeof(configData) - 1) {
-		pr_perror("config file too big");
+		pr_perror("Failed to open config file: %s", config_file_name);
 		return EXIT_FAILURE;
 	}
 
+	if (fstat(fileno(fp), &configData_stat) == -1) {
+		pr_perror("Failed to determine size of config file: %s", config_file_name);
+		return EXIT_FAILURE;
+	}
+	if (configData_stat.st_size == 0) {
+		pr_perror("config file %s is empty", config_file_name);
+		return EXIT_FAILURE;
+	}
+	configData_size = configData_stat.st_size;
+
+	configData = (char *)malloc((size_t)configData_size+1);
+	if (configData == NULL) {
+		pr_perror("Failed to allocate buffer for config data: size=%ld", configData_size+1);
+		return EXIT_FAILURE;
+	}
+
+	rd = fread((void *)configData, 1, (size_t)configData_size, fp);
+	if (rd != (size_t)configData_size) {
+		pr_perror("error encountered on config file read");
+		return EXIT_FAILURE;
+	}
+
+	pr_pdebug("parse %ld bytes of config data from file %s", configData_size, config_file_name);
+
+	configData[configData_size] = 0; /* make sure the JSON string is NULL-terminated */
 	config_node = yajl_tree_parse((const char *)configData, errbuf, sizeof(errbuf));
 	if (config_node == NULL) {
 		pr_perror("parse_error: ");
