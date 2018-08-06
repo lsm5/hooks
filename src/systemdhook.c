@@ -858,9 +858,9 @@ int main(int argc, char *argv[])
 
 	/* 'bundle' must be specified for the OCI hooks, and from there we read the configuration file */
 	json_t *v_bundle_path = json_object_get(node, "bundle");
-	if (!v_bundle_path) {
-		json_t *v_bundle_path = json_object_get(node, "bundlePath");
-	}
+	//if (!v_bundle_path) {
+	//	json_t *v_bundle_path = json_object_get(node, "bundlePath");
+	//}
 	if (!v_bundle_path) {
 		/****
 		* On Docker versions prior to 1.12, bundlePath will not
